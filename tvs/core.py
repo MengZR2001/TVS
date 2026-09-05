@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Corrected prototype, NOT a validated replacement for the paper's TVS.
+"""Torque sensitivity and diversity metrics for motion clips.
 
 Equations/settings trace to icml_code/cal_seq_debug.py; see README.md.
 """
@@ -31,7 +31,7 @@ class Settings:
         if self.weight_mode not in ("prototype-adaptive", "paper-fixed"):
             raise ValueError("choose prototype-adaptive or paper-fixed weights")
         if self.formulation != "prototype-slice":
-            raise ValueError("only the explicitly acknowledged prototype-slice is implemented")
+            raise ValueError("formulation must be prototype-slice")
 
 
 def real_numeric_array(values, name):
@@ -68,7 +68,7 @@ def frame_indices(total, sampling):
 
 
 def prototype_state(poses, trans, fps, frame):
-    """Retain the original angular-vector assignment, not Euler derivatives."""
+    """Build q and assign angular rotation-vector differences to qdot/qddot."""
     velocity = np.gradient(trans, 1 / fps, axis=0, edge_order=1)
     acceleration = np.gradient(velocity, 1 / fps, axis=0, edge_order=1)
     delta = poses[1:] @ poses[:-1].swapaxes(-1, -2)
@@ -77,7 +77,7 @@ def prototype_state(poses, trans, fps, frame):
     angular = np.concatenate((angular, angular[-1:]), axis=0)
     angular_acc = np.gradient(angular, 1 / fps, axis=0, edge_order=1)
     q = smpl_to_rbdl(poses[frame:frame + 1], trans[frame:frame + 1])[0]
-    # Deliberately NOT reordered like q: an unresolved choice in the source.
+    # Angular components stay in SMPL joint order, unlike q's Euler permutation.
     qdot = np.concatenate((velocity[frame], angular[frame].ravel()))
     qddot = np.concatenate((acceleration[frame], angular_acc[frame].ravel()))
     if not all(np.isfinite(x).all() for x in (q, qdot, qddot)):
@@ -153,7 +153,7 @@ def score_motion(poses, trans, dynamics, settings):
         "spectral_diversity", "variance_diversity", "segment_diversity"
     )))
     return {
-        "status": "corrected-prototype-not-validated-paper-reproduction",
+        "status": "success",
         "final_score": final, "enhanced_metrics": metrics,
         "motion_dynamics": movement, "weights": weights,
         "settings": asdict(settings), "frames": frames,

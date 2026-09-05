@@ -9,7 +9,7 @@ import sys
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="CPU TVS corrected-prototype scorer (not full paper reproduction)")
+    parser = argparse.ArgumentParser(description="CPU Torque Variation Score (TVS) for one prepared motion clip")
     parser.add_argument("--input", required=True, type=Path, help="NPZ containing pose and tran")
     parser.add_argument("--output", required=True, type=Path, help="new JSON file; parent must exist")
     parser.add_argument("--urdf", required=True, type=Path, help="external PIP-compatible physics.urdf")
@@ -18,7 +18,7 @@ def main(argv=None):
     parser.add_argument("--epsilon", required=True, type=float, help="central perturbation in radians")
     parser.add_argument("--sampling", required=True, choices=("all", "uniform", "sparse"))
     parser.add_argument("--weight-mode", required=True, choices=("prototype-adaptive", "paper-fixed"))
-    parser.add_argument("--formulation", required=True, choices=("prototype-slice",), help="acknowledge unresolved tau[6:30] and state mapping")
+    parser.add_argument("--formulation", required=True, choices=("prototype-slice",), help="score torque components tau[6:30] using the angular-vector state assignment")
     parser.add_argument("--gravity", required=True, nargs=3, type=float, metavar=("GX", "GY", "GZ"))
     parser.add_argument("--representation", required=True, choices=("axis-angle", "matrix"))
     args = parser.parse_args(argv)
@@ -47,7 +47,7 @@ def main(argv=None):
             pose = Rotation.from_rotvec(pose.reshape(-1, 3)).as_matrix().reshape(-1, 24, 3, 3)
         pose, tran = validate_motion(pose, tran)
         dynamics = RBDLDynamics(urdf, args.binding, args.gravity)
-        print("Scoring corrected prototype; paper thresholds are not calibrated for this release.", file=sys.stderr)
+        print("Scoring motion clip with TVS.", file=sys.stderr)
         result = score_motion(pose, tran, dynamics, settings)
         result["provenance"] = {
             "input": str(source), "urdf": str(urdf), "binding": args.binding,

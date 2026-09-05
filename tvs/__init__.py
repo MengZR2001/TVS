@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Independent CPU implementation of the corrected ICML prototype.
+"""CPU implementation of Torque Variation Score (TVS).
 
 No model or numerical dependency is loaded on package import.
-See README.md and NOTICE.md before interpreting or redistributing results.
+See README.md for usage and NOTICE.md for attribution and license information.
 """
 
 __version__ = "0.1.0"

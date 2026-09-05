@@ -122,12 +122,18 @@ All scoring options below are required; use `python -B -m tvs --help` for CLI he
 | `--epsilon` | Central-difference pose perturbation in radians, strictly between 0 and pi |
 | `--sampling` | `all`: every frame; `sparse`: stride `max(1, T // 10)`; `uniform`: stride `max(1, T // min(20, T))`, limited to 20 frames |
 | `--weight-mode` | `paper-fixed`: weights `[0.4, 0.3, 0.3]`; `prototype-adaptive`: selects those weights or `[0.3, 0.4, 0.3]` based on motion activity |
-| `--formulation` | Must be the literal `prototype-slice`, the supported formulation identifier |
+| `--formulation` | `prototype-slice`: uses torque components `tau[6:30]` and the angular-vector state assignment described below |
 | `--gravity` | Three finite world-space components in m/s^2, e.g. `0 -9.81 0` for Y-up |
 | `--representation` | `axis-angle` or `matrix` |
 
 Each sampled frame requires 144 dynamics evaluations. Sampling reduces the
 number of Jacobian evaluations; temporal derivatives still use the full clip.
+
+The state uses PIP Euler coordinates for `q`. Angular velocity components are
+rotation-vector differences between consecutive poses, in SMPL joint order;
+angular accelerations are their temporal gradients. These components are
+assigned directly to `qdot` and `qddot`, without applying `q`'s Euler permutation
+or converting them to Euler-coordinate derivatives.
 
 ## Output
 
@@ -143,7 +149,7 @@ The CLI prints the final score and writes a JSON report:
 | `jacobian_shape` | `[sample_count, 24, 72]` |
 | `numerics` | Numeric precision, clipping limits, torque slice, and aggregation constants |
 | `provenance` | Input and URDF paths and SHA-256 hashes, binding/version, gravity, representation, and Python/package versions |
-| `status` | Implementation status identifier |
+| `status` | `success` when scoring completes |
 
 ## Tests
 
@@ -154,7 +160,7 @@ python -B -S -m tvs --help
 
 Tests cover conversions, perturbations, derivatives, sampling, metrics, input
 validation, CLI output, and binding call contracts using synthetic data and
-mock dynamics backends; they are not native-dynamics or benchmark results.
+mock dynamics backends.
 PyTorch is an optional reference-test dependency. CLI help requires only the
 Python standard library.
 

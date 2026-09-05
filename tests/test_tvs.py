@@ -57,7 +57,7 @@ class CoreTests(unittest.TestCase):
         jac = torque_jacobian(self.pose, self.tran, Record(), settings(), 0)
         np.testing.assert_array_equal(before, self.pose)
         self.assertEqual(len(recorded), 144)
-        # joint 1 X is q[6]; catches the original minus-side alias/half derivative.
+        # Joint 1 X is q[6]; check both perturbation signs and the derivative.
         self.assertAlmostEqual(recorded[6][6], 1e-6, places=12)
         self.assertAlmostEqual(recorded[7][6], -1e-6, places=12)
         self.assertAlmostEqual(jac[0, 3], 1, places=8)
