@@ -104,30 +104,17 @@ python -B -m tvs --input clip.npz --output clip.json --urdf physics.urdf --bindi
 ```
 
 Adjust paths, binding, frame rate, gravity, and representation to match your
-assets. The output parent directory must already exist; existing output files
+assets. All flags shown are required; CLI help is available with
+`python -B -m tvs --help`.
+
+The output parent directory must already exist; existing output files
 are never overwritten. Input or scoring failures print an error and return
 exit status 1 rather than a zero score.
 
-### Options
+### Method Notes
 
-All scoring options below are required; use `python -B -m tvs --help` for CLI help.
-
-| Option | Values / purpose |
-| --- | --- |
-| `--input` | Prepared NPZ file containing `pose` and `tran` |
-| `--output` | Path to a new JSON file |
-| `--urdf` | External PIP-compatible `physics.urdf` |
-| `--binding` | `rbdl` or `pyrbdl`, matching the installed API |
-| `--fps` | Finite positive input frame rate |
-| `--epsilon` | Central-difference pose perturbation in radians, strictly between 0 and pi |
-| `--sampling` | `all`: every frame; `sparse`: stride `max(1, T // 10)`; `uniform`: stride `max(1, T // min(20, T))`, limited to 20 frames |
-| `--weight-mode` | `paper-fixed`: weights `[0.4, 0.3, 0.3]`; `prototype-adaptive`: selects those weights or `[0.3, 0.4, 0.3]` based on motion activity |
-| `--formulation` | `prototype-slice`: uses torque components `tau[6:30]` and the angular-vector state assignment described below |
-| `--gravity` | Three finite world-space components in m/s^2, e.g. `0 -9.81 0` for Y-up |
-| `--representation` | `axis-angle` or `matrix` |
-
-Each sampled frame requires 144 dynamics evaluations. Sampling reduces the
-number of Jacobian evaluations; temporal derivatives still use the full clip.
+The scorer uses torque components `tau[6:30]`. Each sampled frame requires 144
+dynamics evaluations; temporal derivatives use the full clip.
 
 The state uses PIP Euler coordinates for `q`. Angular velocity components are
 rotation-vector differences between consecutive poses, in SMPL joint order;
