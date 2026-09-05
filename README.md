@@ -1,273 +1,167 @@
-# TVS CPU Scorer
+# Torque Variation Score (TVS)
 
-Code for our ICML 2026 paper **Distinguishing Imitation Error from Intrinsic Motion Learning Difficulty**.
+Code for **[Distinguishing Imitation Error from Intrinsic Motion Learning Difficulty](https://arxiv.org/abs/2512.07248)**, ICML 2026.
 
-An author-requested, independent cleaned implementation of the supplied ICML
-prototype for **Torque Variation Score (TVS)**, with numerical parity unverified.
-This is usable core scoring code, **not a verified
-reproduction of the paper, its scores, or its policy evaluations**. No imports
-or implicit paths refer to `icml_code` or `aaai_code`. Those folders are untouched.
+TVS scores human motion clips using torque sensitivity to pose perturbations.
+This CPU-only scorer takes SMPL joint rotations and root translations, uses an
+external RBDL dynamics model, and writes a JSON report with score components,
+settings, and input provenance. Each invocation scores one prepared clip.
 
-## License
+## Installation
 
-This prepared release is licensed under GNU GPL version 3 only
-(`GPL-3.0-only`); see [LICENSE](LICENSE) for the complete terms and
-[NOTICE.md](NOTICE.md) for PIP attribution and source provenance. The author
-explicitly authorized GPL-3.0-compatible publication on 2026-09-05; author
-licensing approval is no longer pending. This does not establish numerical
-parity or native integration correctness.
+Use Python 3.8 or later. From the repository directory, install the numerical
+dependencies:
 
-The cloned TVS repository's original MIT license was inspected on 2026-09-05
-at commit `5139865445ed2e1921a50d1ca775dbe28dc0ecc9`. Its full text, including
-`Copyright (c) 2026 MengZR2001`, is preserved in [LICENSE-MIT](LICENSE-MIT)
-as a historical license notice. Previous MIT grants remain unaffected.
-MIT-licensed third-party material can be included under GPL-compatible terms
-with its required notices preserved; those MIT grants are not invalidated.
-The PIP-derived adaptation remains GPL-covered; `LICENSE-MIT` does not
-dual-license this release. External assets retain their separate terms.
-This local preparation does not commit, push or modify the remote project.
+```sh
+python -m pip install -r requirements.txt
+```
 
-## Environment
+Scoring uses NumPy and SciPy; it does not require CUDA, PyTorch, rendering, or an
+SMPL body-model file. RBDL and the URDF model must be obtained separately.
+Run the commands below from the repository directory, or add it to `PYTHONPATH`.
 
-- Python 3.8+ with NumPy and SciPy: `python -m pip install -r requirements.txt`.
-- CPU only; no PyTorch, CUDA, SMPL pickle, Chumpy, OpenCV, PyBullet, rendering,
-  policy network, or global model loading is needed.
-- Separately build a compatible RBDL binding with its URDF reader addon. Select
-  the API explicitly; **do not assume `pip install rbdl` or `pip install pyrbdl`
-  installs the correct project**. No native binary is redistributed here.
-- Run commands below from this directory, or put this directory on `PYTHONPATH`.
-  `python -B -S -m tvs --help` works even without numerical packages installed.
+### RBDL Binding
 
-### RBDL Interfaces
+Build a compatible Python binding with the URDF reader addon and select it
+explicitly with `--binding`. The adapters require these APIs:
 
-The local `icml_code/articulate/utils/rbdl/model.py` imports `pyrbdl` and uses
-`Model()`, `URDFReadFromFile(bytes, model, False, False)`, `set_gravity`, a
-return-value `CompositeRigidBodyAlgorithm(model,q,update)`, and return-value
-`NonlinearEffects(model,q,qdot)`. This is the `--binding pyrbdl` contract.
-The exact source revision/build of that local binding is **not identified**.
-It is not installed on the verification machine.
+| Binding | Required API |
+| --- | --- |
+| `rbdl` | `loadModel(path_bytes, floating_base=False)`, writable `model.gravity`, `CompositeRigidBodyAlgorithm(model, q, matrix, update_kinematics=True)`, and `NonlinearEffects(model, q, qdot, bias)` using output arrays |
+| `pyrbdl` | `Model()`, `URDFReadFromFile(path_bytes, model, False, False)`, `model.set_gravity(gravity)`, and return-value `CompositeRigidBodyAlgorithm(model, q, True)` and `NonlinearEffects(model, q, qdot)` |
 
-[Upstream PIP](https://github.com/Xinyu-Yi/PIP) instead imports `rbdl`, using
-`loadModel(bytes)`, `model.gravity`, and output-array arguments for CRBA and
-NonlinearEffects. `--binding rbdl` implements that concrete alternative, not a
-silent fallback. PIP points to [official RBDL](https://github.com/rbdl/rbdl),
-including its Python wrapper and URDF reader. Follow that project's build
-instructions for your chosen revision and Python/NumPy ABI. Typical CMake
-options are `RBDL_BUILD_PYTHON_WRAPPER=ON` and
-`RBDL_BUILD_ADDON_URDFREADER=ON`; consult that revision's documentation.
-Linux/WSL is usually easier; PIP explicitly notes Windows needs source/CMake
-adjustments. No tested native Windows build recipe is claimed here.
+For the `rbdl` API, follow the [official RBDL build instructions](https://github.com/rbdl/rbdl)
+for your revision and Python/NumPy environment. Relevant CMake options are
+`RBDL_BUILD_PYTHON_WRAPPER=ON` and `RBDL_BUILD_ADDON_URDFREADER=ON`.
+The [PIP repository](https://github.com/Xinyu-Yi/PIP) also provides dependency
+guidance. Package names alone do not guarantee API compatibility:
+`pip install rbdl` or `pip install pyrbdl` is not a substitute for checking these
+requirements. There is no automatic binding fallback or bundled native binary.
 
-Use the matching external `physics.urdf`. PIP's [official model
-download](https://xinyu-yi.github.io/PIP/files/urdfmodels.zip) is linked in its
-[readme](https://github.com/Xinyu-Yi/PIP/blob/main/readme.md), with PhysCap
-provenance. The supplied ICML model may differ; identical assets must not be
-assumed. This scorer requires **q_size = qdot_size = 75** and PIP's exact
-coordinate ordering. A model with 75 dimensions but different joint ordering
-is still incompatible. Do not add another floating base: the URDF already has
-one. Quaternion-root models are rejected, not converted by guesswork.
+### URDF Model
 
-The CLI records the URDF SHA-256, binding name/version (if exposed), and package
-versions. Also retain your RBDL commit, compiler, build options and model source
-with experiment records; they cannot be inferred from an unversioned extension.
+Use a PIP-compatible `physics.urdf`. PIP provides an
+[official model download](https://xinyu-yi.github.io/PIP/files/urdfmodels.zip)
+and asset instructions in its [README](https://github.com/Xinyu-Yi/PIP/blob/main/readme.md).
 
-## Usage
+The model must have **`q_size = qdot_size = 75`** and the exact PIP
+Euler-coordinate ordering used by [the pose conversion](tvs/conversions.py).
+Matching dimensions alone is not sufficient. The URDF already includes the
+floating base; do not add another. Quaternion-root models are incompatible.
+Retain the model source and RBDL revision/build settings with your experiments.
 
-Input is one numeric NPZ file containing exactly the arrays used by the scorer:
+## Input Data
+
+Provide a numeric NPZ archive containing these arrays:
 
 | Key | Shape | Meaning |
 | --- | --- | --- |
-| `pose` | `(T,24,3)` | SMPL joint-local axis-angle, radians, including global root |
-| `pose` alternative | `(T,24,3,3)` | proper rotation matrices; choose `--representation matrix` |
-| `tran` | `(T,3)` | root translation in meters, in the same world coordinates as gravity |
+| `pose` | `(T, 24, 3)` | SMPL joint-local axis-angle rotations in radians, including global root orientation; use `--representation axis-angle` |
+| `pose` alternative | `(T, 24, 3, 3)` | Proper rotation matrices in the same joint order; use `--representation matrix` |
+| `tran` | `(T, 3)` | Root translations in meters, in the same world coordinate system as gravity |
 
-Choose the matching representation. At least two frames are required. Matrix
-validation rejects non-rotations/reflections, NaNs and shape mismatches. NPZ is
-loaded with `allow_pickle=False`; `.pt`/pickle loading is deliberately excluded.
-Poses and translations must have real integer or floating dtypes. Complex
-arrays (even with zero imaginary parts), strings, objects and booleans are
-rejected before float64 conversion, not silently coerced or truncated.
-No SMPL-H/SMPL-X joint truncation or hand mapping is guessed.
+Both arrays must have the same frame count, with **at least two frames**, finite
+values, and real integer or floating-point dtypes. Rotation matrices must be
+orthonormal with determinant +1. Boolean, complex, string, and object arrays are
+not accepted. NPZ loading uses `allow_pickle=False`; `.pt` and pickle inputs
+are not supported.
 
-Example for an **already prepared 60 FPS, Y-up** clip. These values explicitly
-select the corrected prototype's settings, not a calibrated paper experiment.
-All paths are examples; replace them with your own assets. The output parent
-must exist, and existing output files are never overwritten.
-
-```powershell
-python -B -m tvs --input "D:\motions\clip.npz" --output "D:\results\clip.json" --urdf "D:\assets\physics.urdf" --binding pyrbdl --fps 60 --epsilon 1e-6 --sampling all --weight-mode prototype-adaptive --formulation prototype-slice --gravity 0 -9.81 0 --representation axis-angle
-```
-
-Use `--binding rbdl` only with the upstream output-array API. Use
-`--weight-mode paper-fixed` to select the paper's fixed `[0.4,0.3,0.3]` weights;
-this changes **only the weights**, not the unresolved formulation. FPS,
-epsilon, sampling, gravity and formulation acknowledgement are all required.
-Errors return exit status 1 and include perturbation/frame context where relevant.
-No failure is converted to a zero score. JSON includes the score components,
-actual frame indices, weights, fixed prototype constants, paths and hashes.
-
-For an already prepared pair of numeric arrays:
+After preparing your arrays, write the input archive with NumPy:
 
 ```python
 import numpy as np
+
+# pose_axis_angle: (T, 24, 3), root_translation: (T, 3)
 np.savez("clip.npz", pose=pose_axis_angle, tran=root_translation)
 ```
 
-Programmatic use accepts rotation matrices and an explicit dynamics instance:
+### Data Preparation
 
-```python
-from tvs.core import Settings, score_motion
-from tvs.dynamics import RBDLDynamics
+Obtain motion data from [AMASS](https://amass.is.tue.mpg.de/) under its
+[license](https://amass.is.tue.mpg.de/license.html) and the constituent datasets'
+terms. Consult the [official SMPL site](https://smpl.is.tue.mpg.de/) for body-model
+access and licensing. Motion data, body-model files, and URDF assets are not
+included in this repository.
 
-settings = Settings(fps=60, epsilon=1e-6, sampling="all",
-                    weight_mode="prototype-adaptive", formulation="prototype-slice")
-backend = RBDLDynamics("/assets/physics.urdf", "rbdl", [0, -9.81, 0])
-result = score_motion(pose_matrices, translations, backend, settings)
+1. Convert the source poses to the 24-joint SMPL convention. SMPL-H and SMPL-X inputs require an explicit joint mapping, not simply the first 72 pose parameters.
+2. Express root orientation, translation, and gravity in a consistent coordinate system and use meters for translation.
+3. Resample as needed before scoring, then set `--fps` to the actual input frame rate. The CLI does not resample motion.
+4. Split sequences into clips before invocation. The paper uses 100-frame clips; the CLI scores the entire supplied clip without truncating or skipping tails.
+5. Record sequence sources, splits, joint mappings, coordinate transforms, resampling, and clip boundaries. Keep clip lengths and scoring settings consistent when comparing scores.
+
+For imitation-policy workflows, see the official
+[UHC](https://github.com/ZhengyiLuo/UniversalHumanoidControl) and
+[PHC / PHC+](https://github.com/ZhengyiLuo/PHC) repositories for their data,
+checkpoint, and simulator instructions.
+
+## Usage
+
+With `clip.npz` prepared at **60 FPS in Y-up coordinates**, and a compatible
+`physics.urdf` in the current directory:
+
+```sh
+python -B -m tvs --input clip.npz --output clip.json --urdf physics.urdf --binding rbdl --fps 60 --epsilon 1e-6 --sampling all --weight-mode prototype-adaptive --formulation prototype-slice --gravity 0 -9.81 0 --representation axis-angle
 ```
 
-Each sampled frame costs 144 dynamics evaluations. Full-clip angular kinematics
-are recomputed on both perturbation sides; sampling only reduces Jacobian
-evaluation, not the sequence used for derivatives. This favors clarity over
-maximum throughput. No speed claim is made for this release.
+Adjust paths, binding, frame rate, gravity, and representation to match your
+assets. The output parent directory must already exist; existing output files
+are never overwritten. Input or scoring failures print an error and return
+exit status 1 rather than a zero score.
 
-## Dataset Preparation
+### Options
 
-The paper describes 100-frame clips from [AMASS](https://amass.is.tue.mpg.de/).
-Acquire data from the official site, accept its license and the constituent
-datasets' conditions, and retain sequence/split provenance. See AMASS's
-[license](https://amass.is.tue.mpg.de/license.html) and the official
-[SMPL model site](https://smpl.is.tue.mpg.de/) for model access/terms.
-No data, fitted body parameters, body-model files or derived skeleton assets
-are distributed in this directory.
+All scoring options below are required; use `python -B -m tvs --help` for CLI help.
 
-AMASS source releases can use SMPL-H poses, different frame rates, coordinate
-frames and body shapes. This release intentionally does **not** invent the
-missing preprocessing protocol. Prepare 24-joint SMPL poses explicitly; record
-the joint mapping, coordinate transform, resampling, FPS, segmentation boundaries
-and dropped tails. Merely passing `--fps 60` does not resample a 120 FPS clip.
-Do not treat the first 72 SMPL-H parameters as a validated SMPL conversion.
+| Option | Values / purpose |
+| --- | --- |
+| `--input` | Prepared NPZ file containing `pose` and `tran` |
+| `--output` | Path to a new JSON file |
+| `--urdf` | External PIP-compatible `physics.urdf` |
+| `--binding` | `rbdl` or `pyrbdl`, matching the installed API |
+| `--fps` | Finite positive input frame rate |
+| `--epsilon` | Central-difference pose perturbation in radians, strictly between 0 and pi |
+| `--sampling` | `all`: every frame; `sparse`: stride `max(1, T // 10)`; `uniform`: stride `max(1, T // min(20, T))`, limited to 20 frames |
+| `--weight-mode` | `paper-fixed`: weights `[0.4, 0.3, 0.3]`; `prototype-adaptive`: selects those weights or `[0.3, 0.4, 0.3]` based on motion activity |
+| `--formulation` | Must be the literal `prototype-slice`, the supported formulation identifier |
+| `--gravity` | Three finite world-space components in m/s^2, e.g. `0 -9.81 0` for Y-up |
+| `--representation` | `axis-angle` or `matrix` |
 
-The original batch script consumes preprocessed `pose.pt` and `tran.pt`, splits
-at 100 frames, skips tails shorter than 10 frames and silently truncates mismatched
-lengths. Here each invocation scores exactly one supplied clip: no hidden
-truncation, skipping, resampling, multiprocessing or dataset split is supplied.
-For a comparable annotation workflow, prepare and record those choices yourself
-before invoking the CLI. Scores on sampled frames or different clip lengths are
-not directly interchangeable. No annotated AMASS download or policy checkpoint
-is claimed to be included.
+Each sampled frame requires 144 dynamics evaluations. Sampling reduces the
+number of Jacobian evaluations; temporal derivatives still use the full clip.
 
-## Numerical Contract
+## Output
 
-The implemented formulation is named `prototype-slice` because several choices
-are unresolved. It follows `cal_seq_debug.py`, not an invented physical fix:
+The CLI prints the final score and writes a JSON report:
 
-1. Convert poses to the PIP 75-coordinate Euler configuration. The root conversion
-   and the 69-component non-root permutation are taken from the shared PIP utility.
-2. Compute translation velocity/acceleration by centered differences inside the
-   clip and one-sided differences at its endpoints. Compute local angular
-   velocity from `R[t+1] @ R[t].T`, repeat the penultimate velocity at the last
-   frame, and differentiate it similarly.
-3. Assign those angular vectors directly into `qdot[3:]` and `qddot[3:]` **in
-   SMPL order**, even though `q` uses reordered Euler coordinates. Angular
-   velocity is not generally an Euler-coordinate derivative. This mismatch is
-   retained and not presented as validated inverse dynamics.
-4. Clip acceleration to `[-1000,1000]`, calculate `M(q) @ qddot + h(q,qdot)`,
-   clip all torque components to `[-10000,10000]`, then retain **`tau[6:30]`**.
-   These are 24 scalar generalized-force entries, **not 24 three-axis joint
-   torques**. No norm, aggregation, reordering or 69/72-axis replacement is invented.
-5. Left-multiply each of 24 joint rotations at a target frame by positive and
-   negative axis perturbations, recompute kinematics and dynamics, and use
-   central differences. Each Jacobian has shape `(24,72)`.
-6. Flatten sampled Jacobians to `(sample_count,1728)`. Spectral diversity is
-   `sum(log(s + 1e-6))` over singular values `s > 1e-10`. Variance diversity is
-   `sum(log(var + 1e-6))`, using sample variance (`ddof=1`) over time and input
-   directions for each output row. Segment diversity averages spectral diversity
-   across `torch.chunk(...,4)`-style contiguous chunks; this can yield fewer than
-   four chunks (e.g. five sampled frames yield three). With fewer than four
-   sampled frames, segment diversity equals spectral diversity. Dynamic range
-   is `log(max(J)-min(J)+1e-6)` and does not enter the final score.
-7. `all` uses all frames; `sparse` uses step `max(1,T//10)`; `uniform` uses
-   step `max(1,T//min(20,T))` and takes at most 20 frames. This preserves the
-   prototype's sometimes uneven coverage rather than substituting linspace.
-8. Prototype motion activity is `min(1,10*(mean_rotation_step +
-   10*mean_translation_step))`, without FPS normalization. Adaptive weights are
-   `[0.4,0.3,0.3]` above 0.5 activity and `[0.3,0.4,0.3]` otherwise.
+| Field | Description |
+| --- | --- |
+| `final_score` | Weighted sum of spectral, variance, and segment diversity |
+| `enhanced_metrics` | `spectral_diversity`, `variance_diversity`, `segment_diversity`, and `dynamic_range`; dynamic range is not included in the final score |
+| `motion_dynamics`, `weights` | Motion activity value and the three weights applied |
+| `settings` | FPS, perturbation size, sampling, weight mode, and formulation |
+| `frames`, `total_frames` | Zero-based sampled frame indices and input clip length |
+| `jacobian_shape` | `[sample_count, 24, 72]` |
+| `numerics` | Numeric precision, clipping limits, torque slice, and aggregation constants |
+| `provenance` | Input and URDF paths and SHA-256 hashes, binding/version, gravity, representation, and Python/package versions |
+| `status` | Implementation status identifier |
 
-### Corrections And Differences
+## Tests
 
-- **Aliasing fixed:** a `.copy()` preserves the unperturbed rotation for both
-  signs. Originally, assignment on the positive side mutated a view reused for
-  the negative side, corrupting the central difference.
-- **Stale RBDL state fixed:** every mass-matrix evaluation explicitly requests
-  kinematic updates. Originally manual updates were enabled but not performed.
-- **Float64 CPU numerics:** NumPy/SciPy replace mixed Torch float32 and OpenCV
-  Rodrigues conversions. Small-angle behavior, singular thresholds, clipping
-  boundaries and resulting scores can differ materially. Epsilon sensitivity
-  should be studied on real data; no stable epsilon range is asserted.
-- **SMPL dependency removed algebraically:** the original zero-shape FK centers
-  the rest root at zero, so its root position is exactly `tran`. Only joint 0's
-  linear derivatives are consumed by `pose_to_rbdl_params`; all other joint
-  positions are unused in scoring. Root translation derivatives therefore avoid
-  loading a licensed pickle without substituting a different skeleton/method.
-- **Failures are fatal:** invalid input, incompatible models and dynamics errors
-  cannot silently create zero torques or plausible scores. T<2 is rejected.
-- **Paper discrepancies remain visible:** Sec. 4.2.4 / Appendix B.2 specify fixed
-  weights; the prototype switches them. Eq. 6 describes population variance but
-  source Torch uses sample variance. The appendix's full-state/per-frame
-  Jacobian/volume discussion is not identical to this pose-only perturbation and
-  flattened-sequence SVD computation. No proof-equivalent replacement is claimed.
-- Ground contacts are omitted as in the source/paper calculation, not simulated
-  or estimated by another method. This release does not verify the paper's
-  contact-neglect argument or applicability to impacts.
-
-Because of these differences, **do not reuse the paper's TVS cutoffs (200/300/350),
-MID values, rankings, correlations, or difficulty labels as calibrated results**.
-Resolve coordinate derivatives, torque selection and mathematical aggregation
-with the authors before claiming paper reproduction.
-
-## Verification
-
-```powershell
+```sh
 python -B -m unittest discover -s tests -v
 python -B -S -m tvs --help
 ```
 
-Tests cover conversion ordering, nontrivial root conversion, perturbation
-symmetry/input immutability, derivative/FPS scaling, sampling, prototype metric
-parity against optional Torch float64, weight selection, fake-backend end-to-end
-scoring, invalid input, failure propagation, and both RBDL call contracts with
-update flags. Torch is only an optional reference-test dependency.
+Tests cover conversions, perturbations, derivatives, sampling, metrics, input
+validation, CLI output, and binding call contracts using synthetic data and
+mock dynamics backends; they are not native-dynamics or benchmark results.
+PyTorch is an optional reference-test dependency. CLI help requires only the
+Python standard library.
 
-Verification here does **not** include real RBDL loading/torques, an SMPL/URDF
-coordinate equivalence test, real AMASS clips, policy training/evaluation, paper
-score parity, or runtime benchmarking. Mock binding tests cannot establish
-binary compatibility or physical correctness. The exact local `pyrbdl` build
-and native integration are remaining verification blockers. See NOTICE.md for
-the authorized release license, attribution, and external-asset conditions.
+## Citation
 
-Local verification on 2026-09-05 used Python 3.8, isolated NumPy 1.24.4 and
-SciPy 1.10.1 wheels, plus the installed Torch reference. The machine's base
-Anaconda NumPy 1.20.1 failed to import its native DLLs; it was not modified.
-Use a clean environment rather than interpreting that installation failure as
-a scorer result. The CLI NPZ-to-JSON test also uses a fake dynamics backend and
-checks provenance and refusal to overwrite existing output.
-
-The cloned release was checked on 2026-09-05 using the existing
-`sk-Perlin/.venv` Python 3.8.8 environment with NumPy 1.24.4 and SciPy 1.10.1:
-14 tests passed and the optional Torch reference test was skipped because
-Torch was unavailable in that environment. The dependency-free CLI help
-check passed. No native RBDL or external assets were used.
-
-## Paper And Policies
-
-Paper inspected: supplied `ICML.pdf`, text identifies
-[arXiv:2512.07248v2](https://arxiv.org/abs/2512.07248), 8 June 2026.
-Its title page lists ICML 2026, PMLR 306. This release implements no imitation
-policy. For the paper's policy experiments consult the official repositories:
-[UHC](https://github.com/ZhengyiLuo/UniversalHumanoidControl) and
-[PHC / PHC+](https://github.com/ZhengyiLuo/PHC), including their dataset,
-checkpoint, simulator and licensing instructions. No alternate method from the
-AAAI folder is included. Utility provenance is not method provenance.
+If you use TVS, cite the paper. For PIP utilities or AMASS data, also cite the
+corresponding work:
 
 ```bibtex
 @article{meng2026tvs,
@@ -275,8 +169,7 @@ AAAI folder is included. Utility provenance is not method provenance.
   author={Meng, Zhaorui and Yin, Lu and Chen, Xinrui and Zuo, Chengxu and
           Chen, Anjun and Guo, Shihui and Qin, Yipeng},
   journal={arXiv preprint arXiv:2512.07248},
-  year={2026},
-  note={Version 2; supplied manuscript lists ICML 2026, PMLR 306}
+  year={2026}
 }
 
 @inproceedings{yi2022pip,
@@ -295,3 +188,13 @@ AAAI folder is included. Utility provenance is not method provenance.
   year={2019}
 }
 ```
+
+## License
+
+This release is licensed under **GNU GPL version 3 only (`GPL-3.0-only`)**;
+see [LICENSE](LICENSE). [NOTICE.md](NOTICE.md) contains attribution and source
+provenance, including PIP-derived utilities.
+
+[LICENSE-MIT](LICENSE-MIT) preserves the original repository's historical MIT
+notice, including `Copyright (c) 2026 MengZR2001`. It does not dual-license this
+release. External datasets, models, and other assets retain their own terms.
